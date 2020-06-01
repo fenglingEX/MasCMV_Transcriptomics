@@ -1,0 +1,86 @@
+configfile: "config.yml"
+
+rule all:
+	input:
+		expand("ContextMap/{reference}/polyA_tails.bed", reference = config["references"]),
+		expand("ContextMap/{reference}/{reference}_polyA_validation.tsv", reference = config["references"]),
+        expand("Final_Output/{reference}/{reference}_polyA_validation.tsv", reference = config["references"]),
+        expand("ContextMap/{reference}/{reference}_polyA_signature_read_counts.tsv", reference = config["references"])
+
+
+rule bwa_index_reference_genomes:
+	input:
+		"Sequences/Reference/{reference}.fa"
+	output:
+		expand("Sequences/Reference/{{reference}}.fa.{extension}", extension=config["bwa_index_extensions"])
+	threads: 1
+	shell:
+		"bwa index {input}"
+
+rule convert_reads_from_fq_to_fastq:
+	input:
+		"Reads/Trimmed/{sample}_R{num}_001_val_{num}.fq"
+	output:
+		"Reads/Trimmed/{sample}_R{num}_001_val_{num}.fastq"
+	threads: 1
+	shell:
+		"mv {input} {output}"
+
+
+def get_corresponding_reads(wildcards):
+	reference = wildcards.reference
+	sample = config["reference_sample_map"][reference][0]
+	files = []
+	for num in [1,2]:
+		files.append("Reads/Trimmed/{}_R{}_001_val_{}.fastq".format(sample, num, num))
+	return files
+
+
+rule run_context_map:
+	input:
+		get_corresponding_reads,
+		"Sequences/Reference/{reference}.fa",
+		expand("Sequences/Reference/{{reference}}.fa.{extension}", extension=config["bwa_index_extensions"])
+	output:
+		"ContextMap/{reference}/polyA_tails.bed",
+		"ContextMap/{reference}/mapping.sam"
+	params:
+		ref_dir = "Sequences/Reference/",
+		out_dir = "ContextMap/{reference}",
+		jar_path = "/home3/scc20x/Software/ContextMap_v2.7.9/ContextMap_v2.7.9.jar"
+	threads: 8
+	shell:
+		"java -jar {params.jar_path} mapper -reads {input[0]} {input[1]} -aligner_name bwa -aligner_bin /usr/bin/bwa -indexer_bin /usr/bin/bwa -indices {input[2]} -genome {params.ref_dir} -t {threads} -o {params.out_dir} --polyA"
+
+
+rule count_polyA_signals:
+	input:
+		"ContextMap/{reference}/polyA_tails.bed",
+		"Sequences/Reference/{reference}.fa"
+	output:
+		"ContextMap/{reference}/{reference}_polyA_validation.tsv"
+	threads: 1
+	shell:
+		"python3 Scripts/get_polyA_signature.py -i {input[0]} -g {input[1]} -o {output}"
+
+
+rule move_output_to_final_directory:
+    input:
+        "ContextMap/{reference}/{reference}_polyA_validation.tsv"
+    output:
+        "Final_Output/{reference}/{reference}_polyA_validation.tsv"
+    threads: 1
+    shell:
+        "cp {input} {output}"
+
+
+rule get_polya_read_sites:
+	input:
+		get_corresponding_reads,
+		"Sequences/Reference/{reference}.fa",
+		"ContextMap/{reference}/{reference}_polyA_validation.tsv"
+	output:
+		"ContextMap/{reference}/{reference}_polyA_signature_read_counts.tsv"
+	threads: 8
+	shell:
+		"python3 Scripts/get_polyA_coverage.py -r {input[2]} -i {input[3]} -o {output} -1 {input[0]} -2 {input[1]} -t {threads}"

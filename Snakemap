@@ -1,0 +1,214 @@
+configfile: "config.yml"
+
+def unpaired_alignment_file(wildcards):
+	files = []
+	for sample in config["all_samples"]:
+		for num in [1,2]:
+			filename = "Alignments/Single_Read/Ambisense/{}_reads_{}_onto_{}_F4.bam".format(sample, num, config["sample_reference_map"][sample][0])
+			print(filename)
+			files.append(filename)
+	return files
+
+def extracted_reads_files(wildcards):
+	files = []
+	for sample in config["all_samples"]:
+		for num in [1,2]:
+			sense_reads = "Reads/Sense/{}_sense_{}_mapped_OTHER_R{}.{}".format(sample, config["sample_reference_map"][sample][0], num, config["raw_reads_format"])
+			files.append(sense_reads)
+			antisense_reads = "Reads/Antisense/{}_antisense_{}_mapped_OTHER_R{}.{}".format(sample, config["sample_reference_map"][sample][0], num, config["raw_reads_format"])
+			files.append(antisense_reads)
+	return files
+
+def junction_coverage_files(wildcards):
+	files = []
+	for sample in config["all_samples"]:
+		for sense in ["plus", "minus"]:
+			for kmer_length in [20]:
+				filename = "Introns/{}/{}_{}_splice_junction_coverage_{}mer.tsv".format(config["sample_reference_map"][sample][0], sample, sense, kmer_length)
+				filename = "Final_Output/{}/{}_{}_splice_junction_coverage_{}mer.tsv".format(config["sample_reference_map"][sample][0], sample, sense, kmer_length)
+				files.append(filename)
+	return files
+
+rule all:
+	input:
+		extracted_reads_files,
+		expand("Reads/{sense}_Strand/{sample}_{sense}_strand_reads.{format}", sense = ["plus", "minus"], sample = config["all_samples"], format = config["raw_reads_format"]),
+		expand("Sequences/Reference/{reference}/Genome", reference = config["references"]),
+		expand("Alignments/STAR/{reference}/{sense}/SJ.out.tab", reference = config["references"], sense = ["plus", "minus"]),
+		junction_coverage_files
+
+
+rule build_bowtie_index:
+	input:
+		"Sequences/Reference/{reference}.fa"
+	output:
+		expand("Sequences/Reference/{{reference}}.fa.{extension}", extension = config["bowtie2_index_extensions"])
+	threads: 1
+	shell:
+		"bowtie2-build {input} {input}"
+
+rule bowtie_map_reads_onto_reference:
+	input:
+		"Sequences/Reference/{reference}.fa",
+		"".join(["Reads/Trimmed/{sample}_R{num}_001_val_{num}.", config["uncompressed_trimmed_reads_format"]]),
+		expand("Sequences/Reference/{{reference}}.fa.{extension}", extension = config["bowtie2_index_extensions"])
+	output:
+		"Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.bam"
+	params:
+		temp_sam = "Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}.sam",
+		temp_mapped_sam = "Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.sam"
+	threads: 8
+	shell:
+		"""
+		bowtie2 -x {input[0]} -U {input[1]} -S {params.temp_sam} --threads {threads}
+		samtools view -h {params.temp_sam} -F4 > {params.temp_mapped_sam}
+		valvs_sam2bam.sh -s {params.temp_mapped_sam}
+		rm {params.temp_sam}
+		"""
+
+rule extract_sense_reads:
+	input:
+		"Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.bam"
+	output:
+		"".join(["Reads/Sense/{sample}_sense_{reference}_mapped_READ1_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Sense/{sample}_sense_{reference}_mapped_READ2_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Sense/{sample}_sense_{reference}_mapped_SINGLETON_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Sense/{sample}_sense_{reference}_mapped_OTHER_R{num}.", config["raw_reads_format"]])
+	threads: 1
+	shell:
+		"""
+		samtools fastq -n -1 {output[0]} -2 {output[1]} -s {output[2]} -0 {output[3]} -F16 {input} 
+		"""
+
+rule extract_antisense_reads:
+	input:
+		"Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.bam"
+	output:
+		"".join(["Reads/Antisense/{sample}_antisense_{reference}_mapped_READ1_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Antisense/{sample}_antisense_{reference}_mapped_READ2_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Antisense/{sample}_antisense_{reference}_mapped_SINGLETON_R{num}.", config["raw_reads_format"]]),
+		"".join(["Reads/Antisense/{sample}_antisense_{reference}_mapped_OTHER_R{num}.", config["raw_reads_format"]])
+	threads: 1
+	shell:
+		"""
+		samtools fastq -n -1 {output[0]} -2 {output[1]} -s {output[2]} -0 {output[3]} -f16 {input} 
+		"""
+
+def get_strand_direction_specific_reads(wildcards):
+	sample = wildcards.sample 
+	reference = config["sample_reference_map"][sample][0]
+	sense = wildcards.sense
+	if sense == "plus":
+		reads_1 = "Reads/Antisense/{}_antisense_{}_mapped_OTHER_R1.{}".format(sample, reference, config["raw_reads_format"])
+		reads_2 = "Reads/Sense/{}_sense_{}_mapped_OTHER_R2.{}".format(sample, reference, config["raw_reads_format"])
+	elif sense == "minus":
+		reads_1 = "Reads/Sense/{}_sense_{}_mapped_OTHER_R1.{}".format(sample, reference, config["raw_reads_format"])
+		reads_2 = "Reads/Antisense/{}_antisense_{}_mapped_OTHER_R2.{}".format(sample, reference, config["raw_reads_format"])
+	return [reads_1, reads_2]
+
+
+
+rule concatenate_strand_specific_reads:
+	input:
+		get_strand_direction_specific_reads
+	output:
+		"".join(["Reads/{sense}_Strand/{sample}_{sense}_strand_reads.", config["raw_reads_format"]])
+	threads: 1
+	shell:
+		"""
+		cat {input[0]} {input[1]} > {output}
+		"""
+
+rule create_star_index_for_reference_genome:
+	input:
+		"Sequences/Reference/{reference}.fa"
+	output:
+		"Sequences/Reference/{reference}/SAindex",
+		"Sequences/Reference/{reference}/SA",
+		"Sequences/Reference/{reference}/Genome"
+	params:
+		output_dir = "Sequences/Reference/{reference}/",
+		SAindexNbases = 8
+	threads: 8
+	shell:
+		"STAR --runMode genomeGenerate --runThreadN {threads} --genomeDir {params.output_dir} --genomeSAindexNbases {params.SAindexNbases} --genomeFastaFiles {input}"
+
+
+def get_read_file_for_star_alignment(wildcards):
+	reference = wildcards.reference
+	sense = wildcards.sense
+	for sample in config["sample_reference_map"]:
+		if reference in config["sample_reference_map"][sample]:
+			return "Reads/{}_Strand/{}_{}_strand_reads.{}".format(sense,sample,sense,config["raw_reads_format"])
+
+
+rule run_star_alignment:
+ 	input:
+ 		get_read_file_for_star_alignment
+ 	output:
+ 		"Alignments/STAR/{reference}/{sense}/Aligned.sortedByCoord.out.bam",
+ 		"Alignments/STAR/{reference}/{sense}/SJ.out.tab"
+ 	params:
+ 		output_dir = "Alignments/STAR/{reference}/{sense}/",
+ 		genome_dir = "Sequences/Reference/{reference}",
+ 		intron_max = 32000,
+ 		intron_min = 50,
+ 		overhang = 70,
+ 		sort_limit = 3190129131 
+ 	threads: 8
+ 	shell:
+ 		"""
+ 		STAR --outSAMtype BAM SortedByCoordinate  --outFileNamePrefix {params.output_dir} --alignIntronMax {params.intron_max} --alignIntronMin {params.intron_min} --runThreadN {threads} --genomeDir {params.genome_dir} --outSAMstrandField intronMotif -sjdbOverhang {params.overhang} --readFilesIn {input} --limitBAMsortRAM {params.sort_limit} 
+ 		"""
+
+rule unzip_original_trimmed_reads:
+	input:
+		"".join(["Reads/Trimmed/{sample}_R{num}_001_val_{num}.", config["trimmed_reads_format"]]),
+	output:
+		"".join(["Reads/Trimmed/{sample}_R{num}_001_val_{num}.", config["uncompressed_trimmed_reads_format"]]),
+	threads: 1
+	shell:
+		"gunzip {input}"
+
+
+rule check_star_plus_output:
+	input:
+		"Sequences/Reference/{reference}.fa",
+		"Alignments/STAR/{reference}/plus/SJ.out.tab",
+		"".join(["Reads/Trimmed/{sample}_R1_001_val_1.", config["uncompressed_trimmed_reads_format"]]),
+		"".join(["Reads/Trimmed/{sample}_R2_001_val_2.", config["uncompressed_trimmed_reads_format"]])
+	output:
+		"Introns/{reference}/{sample}_plus_splice_junction_coverage_{kmer_length}mer.tsv"
+	params:
+		kmer_length = 20
+	threads: 8
+	shell:
+		"python3 Scripts/getIntronCoverage_directional.py -r {input[0]} -i {input[1]} -s {input[3]} -a {input[2]} -o {output} -t {threads} -m 100 -k {wildcards.kmer_length}"
+
+rule check_star_minus_output:
+	input:
+		"Sequences/Reference/{reference}.fa",
+		"Alignments/STAR/{reference}/minus/SJ.out.tab",
+		"".join(["Reads/Trimmed/{sample}_R1_001_val_1.", config["uncompressed_trimmed_reads_format"]]),	
+		"".join(["Reads/Trimmed/{sample}_R2_001_val_2.", config["uncompressed_trimmed_reads_format"]])
+	output:
+		"Introns/{reference}/{sample}_minus_splice_junction_coverage_{kmer_length}mer.tsv"
+	params:
+		kmer_length = 20
+	threads: 8
+	shell:
+		"python3 Scripts/getIntronCoverage_directional.py -r {input[0]} -i {input[1]} -s {input[3]} -a {input[2]} -o {output} -t {threads} -m 100 -k {wildcards.kmer_length}"
+
+
+rule move_output_to_final_directory:
+	input:
+		"Introns/{reference}/{sample}_{strand}_splice_junction_coverage_{kmer_length}mer.tsv"
+	output:
+		"Final_Output/{reference}/{sample}_{strand}_splice_junction_coverage_{kmer_length}mer.tsv"
+	threads: 1
+	shell:
+		"mv {input} {output}"
+
+
+
+
