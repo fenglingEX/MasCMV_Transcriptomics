@@ -1,0 +1,43 @@
+all_samples:
+  - Inf5MNat36_C3_1_S23
+  - Inf5MNat35_A3_2_S25
+  - Inf2MNat2_C2_1_S24
+references:
+  - mascmv1_mnat36_e2-3
+  - mascmv4_mnat35_a3-2
+  - mascmv2a_mnat2_c3-3
+sample_reference_map:
+  Inf5MNat36_C3_1_S23:
+    - mascmv1_mnat36_e2-3
+  Inf5MNat35_A3_2_S25:
+    - mascmv4_mnat35_a3-2
+  Inf2MNat2_C2_1_S24:
+    - mascmv2a_mnat2_c3-3
+reference_sample_map:
+  mascmv1_mnat36_e2-3:
+    - Inf5MNat36_C3_1_S23
+  mascmv4_mnat35_a3-2:
+    - Inf5MNat35_A3_2_S25
+  mascmv2a_mnat2_c3-3:
+    - Inf2MNat2_C2_1_S24
+raw_reads_format:
+  fastq
+compressed_raw_reads_format:
+  fastq.gz
+trimmed_reads_format:
+  fq.gz
+uncompressed_trimmed_reads_format:
+  fq
+bowtie2_index_extensions:
+  - rev.2.bt2
+  - rev.1.bt2
+  - 4.bt2
+  - 3.bt2
+  - 2.bt2
+  - 1.bt2
+bwa_index_extensions:
+  - amb
+  - ann
+  - bwt
+  - pac
+  - sa
