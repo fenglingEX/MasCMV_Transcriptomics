@@ -53,7 +53,7 @@ rule bowtie_map_reads_onto_reference:
 		"".join(["Reads/Trimmed/{sample}_R{num}_001_val_{num}.", config["uncompressed_trimmed_reads_format"]]),
 		expand("Sequences/Reference/{{reference}}.fa.{extension}", extension = config["bowtie2_index_extensions"])
 	output:
-		"Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.bam"
+		bam = "Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.bam"
 	params:
 		temp_sam = "Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}.sam",
 		temp_mapped_sam = "Alignments/Single_Read/Ambisense/{sample}_reads_{num}_onto_{reference}_F4.sam"
@@ -62,8 +62,10 @@ rule bowtie_map_reads_onto_reference:
 		"""
 		bowtie2 -x {input[0]} -U {input[1]} -S {params.temp_sam} --threads {threads}
 		samtools view -h {params.temp_sam} -F4 > {params.temp_mapped_sam}
-		valvs_sam2bam.sh -s {params.temp_mapped_sam}
-		rm {params.temp_sam}
+		samtools view -S -b {params.temp_mapped_sam} | samtools sort -o {output.bam}
+        	samtools index {output.bam}
+        	rm -f {params.temp_mapped_sam}
+		rm -f {params.temp_sam}
 		"""
 
 rule extract_sense_reads:
