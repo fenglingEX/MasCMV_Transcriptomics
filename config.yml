@@ -20,6 +20,8 @@ reference_sample_map:
     - Inf5MNat35_A3_2_S25
   mascmv2a_mnat2_c3-3:
     - Inf2MNat2_C2_1_S24
+contextmap_jar:
+  /home/tools/contextmap2.jar
 raw_reads_format:
   fastq
 compressed_raw_reads_format:
