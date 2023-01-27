@@ -47,7 +47,7 @@ rule run_context_map:
 	params:
 		ref_dir = "Sequences/Reference/",
 		out_dir = "ContextMap/{reference}",
-		jar_path = "/home3/scc20x/Software/ContextMap_v2.7.9/ContextMap_v2.7.9.jar"
+		jar_path = config["contextmap_jar"]
 	threads: 8
 	shell:
 		"java -jar {params.jar_path} mapper -reads {input[0]} {input[1]} -aligner_name bwa -aligner_bin /usr/bin/bwa -indexer_bin /usr/bin/bwa -indices {input[2]} -genome {params.ref_dir} -t {threads} -o {params.out_dir} --polyA"
